@@ -1,0 +1,36 @@
+# 虚拟环境
+venv/
+
+# 数据集 (csd, pkl 等)
+data/mosei_raw/*.csd
+data/mosei/*.csd
+data/*.pkl
+data/*.zip
+
+# 训练输出
+checkpoints/
+logs/
+results_*.json
+
+# 模型权重
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# 系统
+.DS_Store
+*.swp
+*.swo
+
+# IDE
+.vscode/
+.idea/
