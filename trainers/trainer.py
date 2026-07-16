@@ -47,6 +47,7 @@ class Trainer:
         self.device = device
         self.batch_size = batch_size
         self.num_epochs = num_epochs
+        self.base_lr = lr
 
         # DataLoaders
         self.train_loader = DataLoader(
@@ -80,6 +81,7 @@ class Trainer:
         self.tag = tag
         self.best_mae = float("inf")
         self.best_metrics = None
+        self.best_checkpoint_path = None
         os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
     # ----------------------------------------------------------
@@ -127,6 +129,8 @@ class Trainer:
                 self.best_metrics = val_metrics
                 self._save_checkpoint(epoch, val_metrics)
 
+        if self.best_checkpoint_path is not None:
+            self._restore_best_model()
         print(f"\n训练完成 — best MAE={self.best_mae:.4f}")
 
     # ----------------------------------------------------------
@@ -150,6 +154,7 @@ class Trainer:
             if is_train:
                 self.optimizer.zero_grad()
                 preds = self.model(texts, visuals, audios)
+                self._sync_optimizer_parameters()
                 loss = self.criterion(preds, labels)
                 loss.backward()
 
@@ -157,7 +162,7 @@ class Trainer:
                 if self.current_step < self.warmup_steps:
                     lr_scale = (self.current_step + 1) / max(self.warmup_steps, 1)
                     for pg in self.optimizer.param_groups:
-                        pg["lr"] = LEARNING_RATE * lr_scale
+                        pg["lr"] = self.base_lr * lr_scale
                 self.current_step += 1
 
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), GRADIENT_CLIP)
@@ -180,6 +185,21 @@ class Trainer:
 
         return avg_loss, metrics
 
+    def _sync_optimizer_parameters(self):
+        """把 forward 中懒创建的可训练参数加入 optimizer。"""
+        optimizer_param_ids = {
+            id(param)
+            for group in self.optimizer.param_groups
+            for param in group["params"]
+        }
+        new_params = [
+            param
+            for param in self.model.parameters()
+            if param.requires_grad and id(param) not in optimizer_param_ids
+        ]
+        if new_params:
+            self.optimizer.add_param_group({"params": new_params})
+
     # ----------------------------------------------------------
     # Test
     # ----------------------------------------------------------
@@ -198,8 +218,8 @@ class Trainer:
             labels = batch["label"]
             with torch.no_grad():
                 preds = self.model(texts, visuals, audios)
-            all_preds.append(preds.cpu().numpy())
-            all_labels.append(labels.cpu().numpy())
+            all_preds.append(preds.detach().cpu().numpy())
+            all_labels.append(labels.detach().cpu().numpy())
 
         preds_arr = np.concatenate(all_preds)
         labels_arr = np.concatenate(all_labels)
@@ -211,16 +231,35 @@ class Trainer:
     # Checkpoint
     # ----------------------------------------------------------
     def _save_checkpoint(self, epoch: int, metrics: dict):
-        path = os.path.join(CHECKPOINT_DIR, f"best_model_epoch{epoch:03d}_mae{metrics['mae']:.4f}.pt")
+        safe_tag = "".join(
+            char if char.isalnum() or char in "-_" else "_"
+            for char in self.tag
+        )
+        path = os.path.join(
+            CHECKPOINT_DIR,
+            f"best_{safe_tag}_epoch{epoch:03d}_mae{metrics['mae']:.4f}.pt",
+        )
         torch.save(
             {
                 "epoch": epoch,
                 "model_state_dict": self.model.state_dict(),
+                "optimizer_state_dict": self.optimizer.state_dict(),
+                "current_step": self.current_step,
                 "metrics": metrics,
             },
             path,
         )
+        self.best_checkpoint_path = path
         print(f"  → checkpoint saved: {os.path.basename(path)}")
+
+    def _restore_best_model(self):
+        """训练结束后恢复验证集 MAE 最优的模型权重，供测试使用。"""
+        ckpt = torch.load(self.best_checkpoint_path, map_location=self.device)
+        self.model.load_state_dict(ckpt["model_state_dict"])
+        print(
+            "  → restored best checkpoint: "
+            f"{os.path.basename(self.best_checkpoint_path)}"
+        )
 
     def save_results(self, test_metrics: dict | None = None):
         """保存实验结果到 results_{tag}.json"""
@@ -229,6 +268,7 @@ class Trainer:
             "tag": self.tag,
             "best_val_metrics": self.best_metrics,
             "test_metrics": test_metrics,
+            "best_checkpoint": self.best_checkpoint_path,
         }
         path = f"results_{self.tag}.json"
         with open(path, "w") as f:
@@ -238,7 +278,9 @@ class Trainer:
     def load_checkpoint(self, path: str):
         ckpt = torch.load(path, map_location=self.device)
         self.model.load_state_dict(ckpt["model_state_dict"])
+        self._sync_optimizer_parameters()
         if "optimizer_state_dict" in ckpt:
             self.optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        self.current_step = ckpt.get("current_step", self.current_step)
         print(f"Loaded checkpoint: {path} (epoch {ckpt['epoch']})")
         return ckpt.get("metrics", {})

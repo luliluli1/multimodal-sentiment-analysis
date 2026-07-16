@@ -151,7 +151,7 @@ class MOSEISDKDataset(Dataset):
         for seg_id in sorted(candidate_ids):
             # 按 video ID 分 train/val/test
             video_id = seg_id.split("[")[0] if "[" in seg_id else seg_id[:11]
-            if video_id not in split_videos:
+            if split_videos and video_id not in split_videos:
                 continue
 
             # 文本 — h5py.Dataset, shape (N,1) dtype S32

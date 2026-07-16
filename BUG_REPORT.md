@@ -11,7 +11,7 @@
 |---|-----|:---:|:---:|
 | 1 | h5py 类型误判 — FACET/COVAREP 特征未被使用 | 🔴 严重 | ✅ 已修复 |
 | 2 | VisualEncoder 动态 Adapter — 每次 forward 创建新的随机权重 | 🔴 严重 | ✅ 已修复 |
-| 3 | COVAREP 原始特征含 -inf — 导致 NaN 传播 | 🔴 严重 | ❌ 待修复 |
+| 3 | COVAREP 原始特征含 -inf — 导致 NaN 传播 | 🔴 严重 | ✅ 已修复 |
 
 ---
 
@@ -247,12 +247,19 @@ feat = np.nan_to_num(feat, nan=0.0, posinf=0.0, neginf=0.0)
 |-----|---------|------|:--:|
 | 1 | duck-typing 检测 + h5py→numpy 转换 | `models/multimodal_model.py` | ✅ |
 | 2 | 持久化 `input_adapter` | `models/visual_encoder.py` | ✅ |
-| 3 | COVAREP inf 清洗 | `models/covarep_adapter.py` | ❌ 待修复 |
+| 3 | COVAREP 有限值掩码池化 + 输出兜底清洗 | `models/covarep_adapter.py` | ✅ |
 
 ---
 
 ## 后续行动
 
-1. **修复 Bug 3** — COVAREP inf 清洗
-2. **重新训练全部 6 组实验** — 使用修复后的代码
-3. **生成 comparison.csv + analysis.md** — 可信的实验结果
+1. **重新训练全部 6 组实验** — 使用修复后的代码
+2. **生成 comparison.csv + analysis.md** — 可信的实验结果
+
+### 后续加固
+
+- 视觉动态 Adapter 参数在首次 forward 后同步加入 optimizer
+- 带视觉 Adapter 的 checkpoint 可自动恢复其输入维度
+- 训练结束后自动恢复验证集最佳 checkpoint 再测试
+- checkpoint 文件名加入实验 tag，避免多组消融实验互相覆盖
+- 缺失音频不再被推理接口伪装成全零波形

@@ -63,9 +63,15 @@ def main():
         test_ds  = MOSEISDKDataset(split="test",  modalities=args.modalities)
     else:
         print(f"Data:   {args.data}")
-        train_ds = CMUMOSEIDataset(pkl_path=args.data, split="train")
-        val_ds   = CMUMOSEIDataset(pkl_path=args.data, split="val")
-        test_ds  = CMUMOSEIDataset(pkl_path=args.data, split="test")
+        train_ds = CMUMOSEIDataset(
+            pkl_path=args.data, split="train", modalities=args.modalities
+        )
+        val_ds = CMUMOSEIDataset(
+            pkl_path=args.data, split="val", modalities=args.modalities
+        )
+        test_ds = CMUMOSEIDataset(
+            pkl_path=args.data, split="test", modalities=args.modalities
+        )
         if isinstance(train_ds.samples, list) and len(val_ds) == len(train_ds):
             print(f"Hint: 按 {MOSEI_SPLIT_TRAIN:.0%}/{MOSEI_SPLIT_VAL:.0%}/{1-MOSEI_SPLIT_TRAIN-MOSEI_SPLIT_VAL:.0%} 切分")
             from torch.utils.data import Subset
