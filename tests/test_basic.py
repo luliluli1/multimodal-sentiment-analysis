@@ -5,10 +5,13 @@
 
 import numpy as np
 import pytest
+import sys
 import torch
 import torch.nn as nn
+from types import SimpleNamespace
 from torch.utils.data import DataLoader
 
+from data.mosei_sdk_dataset import MOSEISDKDataset, REQUIRED_CSD
 from models.covarep_adapter import CovarepAdapter
 from models.audio_encoder import AudioEncoder
 from models.fusion import MultimodalFusion
@@ -272,6 +275,117 @@ class TestTrainer:
         metrics = trainer.test()
 
         assert metrics["mae"] == 0.5
+
+
+class TestMOSEIDataLoading:
+    @staticmethod
+    def _fake_sequences():
+        seg_id = "video[0]"
+
+        def sequence(features):
+            return SimpleNamespace(
+                data={seg_id: {"features": features}}
+            )
+
+        return {
+            "CMU_MOSEI_TimestampedWords": sequence(
+                np.array([[b"hello"]], dtype=object)
+            ),
+            "CMU_MOSEI_Labels": sequence(
+                np.array([[1.0]], dtype=np.float32)
+            ),
+            "CMU_MOSEI_VisualFacet42": sequence(
+                np.zeros((2, 42), dtype=np.float32)
+            ),
+            "CMU_MOSEI_COVAREP": sequence(
+                np.zeros((2, 74), dtype=np.float32)
+            ),
+        }
+
+    def test_local_loader_aligns_csd_files(self, tmp_path, monkeypatch):
+        for filename in REQUIRED_CSD.values():
+            (tmp_path / filename).touch()
+
+        calls = {}
+
+        class _Dataset:
+            def __init__(self):
+                self.computational_sequences = self_sequences
+
+            def align(self, reference):
+                calls["reference"] = reference
+
+        self_sequences = self._fake_sequences()
+        def make_dataset(path):
+            calls["path"] = path
+            return _Dataset()
+
+        fake_sdk = SimpleNamespace(
+            mmdataset=make_dataset
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "mmsdk",
+            SimpleNamespace(mmdatasdk=fake_sdk),
+        )
+
+        dataset = MOSEISDKDataset.__new__(MOSEISDKDataset)
+        dataset.cache_dir = str(tmp_path)
+        dataset.split = "train"
+        dataset._get_split_videos = lambda: set()
+
+        samples = dataset._load_local()
+
+        assert calls["path"] == str(tmp_path)
+        assert calls["reference"] == "CMU_MOSEI_Labels"
+        assert samples[0]["text"] == "hello"
+        assert samples[0]["visual"].shape == (2, 42)
+        assert samples[0]["audio"].shape == (2, 74)
+
+    def test_remote_loader_downloads_only_required_sequences(self, monkeypatch):
+        calls = {}
+        self_sequences = self._fake_sequences()
+
+        class _Dataset:
+            computational_sequences = self_sequences
+
+            def align(self, reference):
+                calls["reference"] = reference
+
+        def make_dataset(recipe, destination):
+            calls["recipe"] = recipe
+            calls["destination"] = destination
+            return _Dataset()
+
+        fake_sdk = SimpleNamespace(
+            mmdataset=make_dataset,
+            cmu_mosei=SimpleNamespace(
+                raw={"words": "words-url", "phones": "phones-url"},
+                highlevel={
+                    "COVAREP": "covarep-url",
+                    "FACET 4.2": "facet-url",
+                    "OpenFace_2": "openface-url",
+                },
+                labels={"All Labels": "labels-url"},
+            ),
+        )
+        monkeypatch.setitem(
+            sys.modules,
+            "mmsdk",
+            SimpleNamespace(mmdatasdk=fake_sdk),
+        )
+
+        dataset = MOSEISDKDataset.__new__(MOSEISDKDataset)
+        dataset.cache_dir = "cache"
+        dataset.split = "train"
+        dataset._get_split_videos = lambda: set()
+
+        samples = dataset._load_remote()
+
+        assert set(calls["recipe"]) == set(self_sequences)
+        assert calls["destination"] == "cache"
+        assert calls["reference"] == "CMU_MOSEI_Labels"
+        assert len(samples) == 1
 
 
 class TestPreprocessing:
