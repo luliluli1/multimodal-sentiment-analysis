@@ -32,13 +32,52 @@ class CovarepAdapter(nn.Module):
             (B, 768)
         """
         pooled = []
-        for feat in audio_features:
-            if feat is None or feat.size == 0:
-                pooled.append(np.zeros(74, dtype=np.float32))
-            elif feat.ndim == 1:
-                pooled.append(feat.astype(np.float32))
+        for feat in audio_features: #特征要么是二维，要么是一维
+            if feat is None:
+                pooled.append(np.zeros(74, dtype=np.float32))  #处理特征值为空值的情况
+                continue
+            feat = np.asarray(feat, dtype=np.float32)   # 统一转换为 float32 numpy 数组
+            if feat.size == 0:
+                pooled.append(np.zeros(74, dtype=np.float32))   #处理特征值为0的情况
+                continue
+            if feat.ndim == 1:#如果是一维的，先把异常值改为0，然后再进行格式转换
+                pooled_feat = np.nan_to_num(
+                    feat,
+                    nan=0.0,
+                    posinf=0.0,
+                    neginf=0.0,
+                )
+            elif feat.ndim ==2 :
+                finite_mask = np.isfinite(feat)
+                finite_sum = np.where(
+                    finite_mask,
+                    feat,
+                    0.0,
+                    ).sum(axis=0, dtype=np.float64)
+                finite_count = finite_mask.sum(axis=0)
+                pooled_feat = np.divide(
+                    finite_sum,
+                    finite_count,
+                    out=np.zeros_like(finite_sum),
+                    where=finite_count > 0,
+                    ).astype(np.float32)                
             else:
-                pooled.append(feat.mean(axis=0).astype(np.float32))
+                raise ValueError(
+                    f"COVAREP 特征维度错误，期望 1D 或 2D，实际 shape={feat.shape}"
+                )        
+            pooled_feat = np.nan_to_num(
+                pooled_feat,
+                nan=0.0,
+                posinf=0.0,
+                neginf=0.0,
+            ).astype(np.float32)
 
+            # COVAREP 应当是 74 维
+            if pooled_feat.shape != (74,):
+                raise ValueError(
+                    f"COVAREP 特征应为 74 维，实际 shape={pooled_feat.shape}"
+                )
+
+            pooled.append(pooled_feat)
         x = torch.tensor(np.stack(pooled, axis=0))  # (B, 74)
         return self.mlp(x)  # (B, 768)
