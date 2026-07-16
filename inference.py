@@ -23,7 +23,9 @@
 from __future__ import annotations
 
 import argparse
+import glob
 import os
+import re
 import sys
 from typing import Optional
 
@@ -47,20 +49,22 @@ class MultimodalPredictor:
     def __init__(
         self,
         checkpoint_path: Optional[str] = None,
+        checkpoint_tag: str = "full",
         device: Optional[str] = None,
     ):
         """初始化推理器。
 
         Args:
-            checkpoint_path: checkpoint 文件路径。默认使用最佳模型。
+            checkpoint_path: checkpoint 文件路径。默认自动选择对应 tag 的最佳模型。
+            checkpoint_tag: 自动查找时使用的实验 tag。
             device: 推理设备。默认使用 config.DEVICE。
         """
         self.device = device or DEVICE
-        checkpoint_path = checkpoint_path or os.path.join(
-            CHECKPOINT_DIR, "best_model_epoch005_mae0.4025.pt"
+        checkpoint_path = checkpoint_path or self._find_best_checkpoint(
+            checkpoint_tag
         )
 
-        if not os.path.exists(checkpoint_path):
+        if checkpoint_path is None or not os.path.exists(checkpoint_path):
             raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
         self.model = MultimodalSentimentModel()
@@ -129,6 +133,30 @@ class MultimodalPredictor:
     # 内部
     # ----------------------------------------------------------
 
+    @staticmethod
+    def _find_best_checkpoint(tag: str) -> Optional[str]:
+        """选择 tag 对应、文件名中验证 MAE 最低的 checkpoint。"""
+        patterns = [
+            os.path.join(CHECKPOINT_DIR, f"best_{tag}_epoch*_mae*.pt"),
+        ]
+        if tag == "full":
+            patterns.append(
+                os.path.join(CHECKPOINT_DIR, "best_model_epoch*_mae*.pt")
+            )
+
+        candidates = []
+        for pattern in patterns:
+            candidates.extend(glob.glob(pattern))
+        if not candidates:
+            return None
+
+        def mae_key(path: str) -> tuple[float, str]:
+            match = re.search(r"_mae(-?\d+(?:\.\d+)?)\.pt$", path)
+            mae = float(match.group(1)) if match else float("inf")
+            return mae, path
+
+        return min(candidates, key=mae_key)
+
     @classmethod
     def _score_to_result(cls, score: float) -> tuple[str, float]:
         """连续分数 → (sentiment_label, confidence)。"""
@@ -151,7 +179,7 @@ def main():
     parser = argparse.ArgumentParser(description="多模态情感分析 — 推理测试")
     parser.add_argument(
         "--checkpoint", type=str,
-        default=os.path.join(CHECKPOINT_DIR, "best_model_epoch005_mae0.4025.pt"),
+        default=None,
     )
     parser.add_argument(
         "--sample", type=int, default=0,
@@ -177,25 +205,27 @@ def main():
     sample = test_ds[args.sample]
     tag = "-".join(args.modalities)
 
-    # 不同模态组合可加载不同 checkpoint
-    ckpt_map = {
-        "text": "best_model_epoch026_mae0.4042.pt",
-        "visual": os.path.basename(args.checkpoint),  # fallback
-        "audio": os.path.basename(args.checkpoint),
-        "text-visual": "best_model_epoch044_mae0.3916.pt",
-        "text-audio": "best_model_epoch042_mae0.3978.pt",
-        "text-audio-visual": os.path.basename(args.checkpoint),
+    checkpoint_tags = {
+        "text": "text",
+        "visual": "visual",
+        "audio": "audio",
+        "text-visual": "text_visual",
+        "text-audio": "text_audio",
+        "text-audio-visual": "full",
     }
-    ckpt_name = ckpt_map.get(tag, os.path.basename(args.checkpoint))
-    ckpt_path = os.path.join(CHECKPOINT_DIR, ckpt_name)
+    checkpoint_tag = checkpoint_tags[tag]
 
     # 加载推理器
-    print(f"Loading checkpoint: {ckpt_path}")
+    print(f"Loading checkpoint: {args.checkpoint or f'best tag={checkpoint_tag}'}")
     predictor = MultimodalPredictor(
-        checkpoint_path=ckpt_path,
+        checkpoint_path=args.checkpoint,
+        checkpoint_tag=checkpoint_tag,
         device=args.device,
     )
-    print(f"  Checkpoint metrics: MAE={predictor.checkpoint_metrics.get('mae', 'N/A'):.4f}")
+    print(f"  Resolved checkpoint: {predictor.checkpoint_path}")
+    mae = predictor.checkpoint_metrics.get("mae")
+    print(f"  Checkpoint metrics: MAE={mae:.4f}" if mae is not None
+          else "  Checkpoint metrics: MAE=N/A")
 
     # 推理
     has_text = "text" in args.modalities

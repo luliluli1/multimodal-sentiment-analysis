@@ -52,9 +52,9 @@ class MultimodalSentimentModel(nn.Module):
     # ----------------------------------------------------------
     def forward(
         self,
-        texts: list[str],
-        visual_inputs: list,
-        audio_inputs: list,
+        texts: list[str] | None,
+        visual_inputs: list | None,
+        audio_inputs: list | None,
     ) -> torch.Tensor:
         # ── 1. 检测可用模态 ──
         vis_type = self._detect_visual_type(visual_inputs)
@@ -97,14 +97,17 @@ class MultimodalSentimentModel(nn.Module):
         if has_aud:  available.append(("audio",  aud_feat))
 
         # ── 4. 按模态数量路由 ──
+        if not available:
+            raise ValueError("至少需要一个有效模态 (text / visual / audio)")
+
         if len(available) == 1:
             # 单模态 — 共享 classifier_head (768 → 1)
             return self.classifier_head(available[0][1])
 
         # 多模态 — Fusion (Cross-Attention)
-        # 对于 2+ 模态，text 始终参与（visual+audio 多模态暂不支持）
+        # 当前 Cross-Attention 以 text 为 query，不支持 visual+audio 双模态。
         if not has_text:
-            text_feat = torch.zeros_like(available[0][1])
+            raise ValueError("visual+audio 双模态暂不支持，融合时必须提供文本")
         if not has_vis:
             vis_feat = torch.zeros_like(text_feat)
         if not has_aud:
@@ -125,20 +128,35 @@ class MultimodalSentimentModel(nn.Module):
 
     @staticmethod
     def _detect_visual_type(inputs: list) -> str:
+        if not inputs:
+            return "none"
         for v in inputs:
             # duck-typing: h5py AsTypeView / np.ndarray 均有 ndim+size
-            if hasattr(v, "ndim") and v.size > 0:
+            if hasattr(v, "ndim") and MultimodalSentimentModel._input_size(v) > 0:
                 return "openface"
-            if isinstance(v, str) and len(v) > 0:
+            if isinstance(v, str) and v.strip():
                 return "image"
         return "none"
 
     @staticmethod
     def _detect_audio_type(inputs: list) -> str:
+        if not inputs:
+            return "none"
         for a in inputs:
-            if hasattr(a, "ndim") and a.size > 0:
+            if hasattr(a, "ndim") and MultimodalSentimentModel._input_size(a) > 0:
                 return "covarep" if a.ndim == 2 else "waveform"
         return "none"
+
+    @staticmethod
+    def _input_size(value) -> int:
+        """兼容 numpy/h5py/torch 的 size 表示。"""
+        size = getattr(value, "size", 0)
+        if callable(size):
+            if hasattr(value, "numel"):
+                return int(value.numel())
+            shape = getattr(value, "shape", ())
+            return int(np.prod(shape))
+        return int(size)
 
     # ----------------------------------------------------------
     # 推理接口 (Demo / API 用)
@@ -148,7 +166,7 @@ class MultimodalSentimentModel(nn.Module):
         self.eval()
         texts = [text or ""]
         visuals = [image_path or ""]
-        audios = [audio if audio is not None else np.zeros(16000, dtype=np.float32)]
+        audios = [audio]
         score = self.forward(texts, visuals, audios).item()
 
         label = "positive" if score > 0.5 else ("negative" if score < -0.5 else "neutral")

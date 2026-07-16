@@ -2,8 +2,8 @@
 CMU-MOSEI SDK 数据集。
 
 加载顺序:
-  1. 尝试 mmsdk 远程下载 (需 CMU 许可)
-  2. 尝试本地 .csd 文件 (手动下载后放到 data/mosei_raw/)
+  1. 尝试本地 .csd 文件 (手动下载后放到 data/mosei_raw/)
+  2. 尝试 mmsdk 远程下载
   3. fallback 合成数据
 
 需要的 .csd 文件 (4 个):
@@ -50,9 +50,9 @@ class MOSEISDKDataset(Dataset):
         self.cache_dir = cache_dir or DATA_DIR
         os.makedirs(self.cache_dir, exist_ok=True)
 
-        # 加载顺序: 远程 → 本地 → 合成
+        # 加载顺序: 本地 → 远程 → 合成，避免已有数据时重复下载。
         samples = None
-        for loader in [self._load_remote, self._load_local]:
+        for loader in [self._load_local, self._load_remote]:
             try:
                 samples = loader()
                 if samples:
@@ -72,16 +72,19 @@ class MOSEISDKDataset(Dataset):
     def _load_remote(self) -> list[dict] | None:
         from mmsdk import mmdatasdk
 
-        dataset = mmdatasdk.mmdataset(
-            mmdatasdk.cmu_mosei.highlevel, self.cache_dir
-        )
-        dataset.add_computational_sequences(
-            mmdatasdk.cmu_mosei.raw, self.cache_dir
-        )
-        dataset.add_computational_sequences(
-            mmdatasdk.cmu_mosei.labels, self.cache_dir
-        )
-        dataset.align("All Labels")
+        # 只下载本项目使用的 4 个序列，并统一使用 CSD root name 作为 key。
+        recipe = {
+            "CMU_MOSEI_TimestampedWords":
+                mmdatasdk.cmu_mosei.raw["words"],
+            "CMU_MOSEI_COVAREP":
+                mmdatasdk.cmu_mosei.highlevel["COVAREP"],
+            "CMU_MOSEI_VisualFacet42":
+                mmdatasdk.cmu_mosei.highlevel["FACET 4.2"],
+            "CMU_MOSEI_Labels":
+                mmdatasdk.cmu_mosei.labels["All Labels"],
+        }
+        dataset = mmdatasdk.mmdataset(recipe, self.cache_dir)
+        dataset.align("CMU_MOSEI_Labels")
 
         words_seq = dataset.computational_sequences["CMU_MOSEI_TimestampedWords"]
         labels_seq = dataset.computational_sequences["CMU_MOSEI_Labels"]
@@ -94,7 +97,7 @@ class MOSEISDKDataset(Dataset):
     # 本地加载 (.csd 文件放 ./data/mosei_raw/)
     # ----------------------------------------------------------
     def _load_local(self) -> list[dict] | None:
-        from mmsdk.mmdatasdk import computational_sequence as cs
+        from mmsdk import mmdatasdk
 
         # 检查文件是否存在
         missing = []
@@ -109,13 +112,16 @@ class MOSEISDKDataset(Dataset):
                 f"  请下载后放到 {self.cache_dir}/"
             )
 
-        print("  加载本地 .csd 文件...")
-        words_seq  = cs(os.path.join(self.cache_dir, REQUIRED_CSD["words"]))
-        labels_seq = cs(os.path.join(self.cache_dir, REQUIRED_CSD["labels"]))
-        facet_seq  = cs(os.path.join(self.cache_dir, REQUIRED_CSD["facet"]))
-        covarep_seq = cs(os.path.join(self.cache_dir, REQUIRED_CSD["covarep"]))
+        print("  加载并按标签对齐本地 .csd 文件...")
+        dataset = mmdatasdk.mmdataset(self.cache_dir)
+        dataset.align("CMU_MOSEI_Labels")
 
-        # 手动对齐: 取所有序列中共有的 segment ID
+        words_seq = dataset.computational_sequences["CMU_MOSEI_TimestampedWords"]
+        labels_seq = dataset.computational_sequences["CMU_MOSEI_Labels"]
+        facet_seq = dataset.computational_sequences["CMU_MOSEI_VisualFacet42"]
+        covarep_seq = dataset.computational_sequences["CMU_MOSEI_COVAREP"]
+
+        # align 后再取所有序列中共有的 segment ID。
         common_ids = (
             set(words_seq.data.keys())
             & set(labels_seq.data.keys())
@@ -151,7 +157,7 @@ class MOSEISDKDataset(Dataset):
         for seg_id in sorted(candidate_ids):
             # 按 video ID 分 train/val/test
             video_id = seg_id.split("[")[0] if "[" in seg_id else seg_id[:11]
-            if video_id not in split_videos:
+            if split_videos and video_id not in split_videos:
                 continue
 
             # 文本 — h5py.Dataset, shape (N,1) dtype S32

@@ -7,14 +7,15 @@
 #  全模态: full
 #
 # 用法:
-#   bash scripts/run_ablations.sh [EPOCHS] [DEVICE]
-#   bash scripts/run_ablations.sh 50 cpu
+#   bash scripts/run_ablations.sh [EPOCHS] [DEVICE] [BATCH]
+#   bash scripts/run_ablations.sh 50 cuda 2
 # ================================================================
 
 set -e
 EPOCHS=${1:-50}
 DEVICE=${2:-cpu}
-SCRIPT="python scripts/train.py --sdk --epochs $EPOCHS --device $DEVICE"
+BATCH=${3:-2}
+SCRIPT="python scripts/train.py --sdk --epochs $EPOCHS --device $DEVICE --batch $BATCH"
 
 # ── 实验矩阵 ──
 # 格式: "tag|modalities_args"
@@ -30,7 +31,7 @@ TOTAL=${#EXPERIMENTS[@]}
 
 echo "============================================"
 echo "  Baseline Comparison — CMU-MOSEI"
-echo "  ${TOTAL} experiments × ${EPOCHS} epochs  |  device=${DEVICE}"
+echo "  ${TOTAL} experiments × ${EPOCHS} epochs  |  device=${DEVICE} batch=${BATCH}"
 echo "============================================"
 
 for i in "${!EXPERIMENTS[@]}"; do
@@ -52,7 +53,7 @@ echo "============================================"
 echo "  Generating comparison table..."
 echo "============================================"
 
-python3 - "$TOTAL" "${EXPERIMENTS[@]}" << 'PYEOF'
+python - "$TOTAL" "${EXPERIMENTS[@]}" << 'PYEOF'
 import json, os, sys
 
 # 实验列表从 shell 参数传入

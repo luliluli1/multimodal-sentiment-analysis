@@ -57,11 +57,29 @@ class AudioEncoder(nn.Module):
         Returns:
             (batch_size, 768) 特征向量
         """
-        # 填充到统一长度
-        max_len = max(len(a) for a in audio_list)
+        if not audio_list:
+            raise ValueError("audio_list 不能为空")
+
+        normalized = []
+        for audio in audio_list:
+            if audio is None:
+                normalized.append(None)
+                continue
+            audio = np.asarray(audio, dtype=np.float32).reshape(-1)
+            normalized.append(
+                np.nan_to_num(audio, nan=0.0, posinf=0.0, neginf=0.0)
+            )
+
+        valid_lengths = [len(audio) for audio in normalized if audio is not None]
+        if not valid_lengths:
+            raise ValueError("audio_list 中没有有效波形")
+
+        # 填充到统一长度；缺失样本使用同 batch 等长静音。
+        max_len = max(valid_lengths)
         padded = np.zeros((len(audio_list), max_len), dtype=np.float32)
-        for i, a in enumerate(audio_list):
-            padded[i, : len(a)] = a
+        for i, audio in enumerate(normalized):
+            if audio is not None:
+                padded[i, : len(audio)] = audio
 
         inputs = self.feature_extractor(
             padded,

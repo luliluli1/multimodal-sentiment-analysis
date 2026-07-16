@@ -31,8 +31,12 @@ def compute_metrics(predictions: np.ndarray, targets: np.ndarray) -> dict:
 
     # Pearson correlation
     try:
+        if np.ptp(preds) == 0 or np.ptp(y) == 0:
+            raise ValueError("constant input")
         corr, _ = pearsonr(preds, y)
         corr = float(corr)
+        if not np.isfinite(corr):
+            corr = 0.0
     except Exception:
         corr = 0.0
 
