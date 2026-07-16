@@ -4,13 +4,15 @@
 组装: TextEncoder + ImageEncoder + VisualEncoder + AudioEncoder
       + CovarepAdapter + MultimodalFusion + ClassifierHead
 
-路径:
-  Exp1  Text-only:          BERT → classifier_head → score
-  Exp2  Text + COVAREP:     BERT + CovarepAdapter → fusion(use_audio=True)
-  Exp3  Text + FACET:       BERT + VisualEncoder  → fusion(use_image=True)
-  Exp4  Full (text+visual+audio):  全部 → fusion(use_image=True, use_audio=True)
-  Demo  image path:         BERT + ImageEncoder(ViT)  → fusion
-  Demo  raw waveform:       BERT + AudioEncoder(Wav2Vec2) → fusion
+统一路由框架 (encode → collect → route by count):
+  N=1  (text | visual | audio):
+       Encoder → classifier_head → score
+  N=2  (text+visual | text+audio):
+       Encoders → Fusion(Cross-Attention) → score
+  N=3  (text+visual+audio):
+       Encoders → Fusion(Cross-Attention) → score
+  Demo image path:      BERT + ImageEncoder(ViT) → fusion
+  Demo raw waveform:    BERT + AudioEncoder(Wav2Vec2) → fusion
 """
 
 from __future__ import annotations
@@ -37,7 +39,7 @@ class MultimodalSentimentModel(nn.Module):
         self.covarep_adapter = CovarepAdapter()
         self.fusion = MultimodalFusion()
 
-        # Text-only 分类器 (不经过 fusion)
+        # 单模态分类器 — 所有 Encoder 输出均为 768d，共享此 head
         self.classifier_head = nn.Sequential(
             nn.Linear(768, 256),
             nn.ReLU(),
@@ -45,48 +47,87 @@ class MultimodalSentimentModel(nn.Module):
             nn.Linear(256, 1),
         )
 
+    # ----------------------------------------------------------
+    # 统一 forward
+    # ----------------------------------------------------------
     def forward(
         self,
         texts: list[str],
         visual_inputs: list,
         audio_inputs: list,
     ) -> torch.Tensor:
-        text_feat = self.text_encoder(texts)  # (B, 768)
-
+        # ── 1. 检测可用模态 ──
         vis_type = self._detect_visual_type(visual_inputs)
         aud_type = self._detect_audio_type(audio_inputs)
+        has_text = self._has_text(texts)
         has_vis = vis_type != "none"
         has_aud = aud_type != "none"
 
-        # ── Exp1: Text-only → classifier_head (不经过 fusion) ──
-        if not has_vis and not has_aud:
-            return self.classifier_head(text_feat)
-
-        # ── 提取辅助模态特征 ──
+        # ── 2. 编码可用模态 ──
+        # h5py AsTypeView → np.ndarray（encoders 内部依赖 numpy 方法）
         if has_vis:
-            if vis_type == "openface":
-                vis_feat = self.visual_encoder(visual_inputs)
-            else:
-                vis_feat = self.image_encoder(visual_inputs)
+            visual_inputs = [np.asarray(v, dtype=np.float32)
+                           if hasattr(v, "ndim") and not isinstance(v, np.ndarray)
+                           else v for v in visual_inputs]
+        if has_aud:
+            audio_inputs = [np.asarray(a, dtype=np.float32)
+                          if hasattr(a, "ndim") and not isinstance(a, np.ndarray)
+                          else a for a in audio_inputs]
+
+        text_feat = self.text_encoder(texts) if has_text else None
+
+        if has_vis:
+            vis_feat = (self.visual_encoder(visual_inputs)
+                        if vis_type == "openface"
+                        else self.image_encoder(visual_inputs))
         else:
-            vis_feat = torch.zeros_like(text_feat)
+            vis_feat = None
 
         if has_aud:
-            if aud_type == "covarep":
-                aud_feat = self.covarep_adapter(audio_inputs)
-            else:
-                aud_feat = self.audio_encoder(audio_inputs)
+            aud_feat = (self.covarep_adapter(audio_inputs)
+                        if aud_type == "covarep"
+                        else self.audio_encoder(audio_inputs))
         else:
+            aud_feat = None
+
+        # ── 3. 收集可用特征 ──
+        available: list[tuple[str, torch.Tensor]] = []
+        if has_text: available.append(("text",   text_feat))
+        if has_vis:  available.append(("visual", vis_feat))
+        if has_aud:  available.append(("audio",  aud_feat))
+
+        # ── 4. 按模态数量路由 ──
+        if len(available) == 1:
+            # 单模态 — 共享 classifier_head (768 → 1)
+            return self.classifier_head(available[0][1])
+
+        # 多模态 — Fusion (Cross-Attention)
+        # 对于 2+ 模态，text 始终参与（visual+audio 多模态暂不支持）
+        if not has_text:
+            text_feat = torch.zeros_like(available[0][1])
+        if not has_vis:
+            vis_feat = torch.zeros_like(text_feat)
+        if not has_aud:
             aud_feat = torch.zeros_like(text_feat)
 
         return self.fusion(text_feat, vis_feat, aud_feat,
-                          use_image=has_vis, use_audio=has_aud)
+                           use_image=has_vis, use_audio=has_aud)
 
     # ----------------------------------------------------------
+    # 模态检测
+    # ----------------------------------------------------------
+    @staticmethod
+    def _has_text(texts: list[str] | None) -> bool:
+        """检查 batch 中是否存在有效文本。"""
+        if texts is None:
+            return False
+        return any(t for t in texts if t and str(t).strip())
+
     @staticmethod
     def _detect_visual_type(inputs: list) -> str:
         for v in inputs:
-            if isinstance(v, np.ndarray):
+            # duck-typing: h5py AsTypeView / np.ndarray 均有 ndim+size
+            if hasattr(v, "ndim") and v.size > 0:
                 return "openface"
             if isinstance(v, str) and len(v) > 0:
                 return "image"
@@ -95,10 +136,12 @@ class MultimodalSentimentModel(nn.Module):
     @staticmethod
     def _detect_audio_type(inputs: list) -> str:
         for a in inputs:
-            if isinstance(a, np.ndarray) and a.size > 0:
+            if hasattr(a, "ndim") and a.size > 0:
                 return "covarep" if a.ndim == 2 else "waveform"
         return "none"
 
+    # ----------------------------------------------------------
+    # 推理接口 (Demo / API 用)
     # ----------------------------------------------------------
     @torch.no_grad()
     def predict(self, text=None, image_path=None, audio=None) -> dict:

@@ -26,6 +26,7 @@ class VisualEncoder(nn.Module):
         super().__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
+        self.input_adapter = None  # 懒初始化：首 forward 时按实际维度创建
 
         self.mlp = nn.Sequential(
             nn.Linear(input_dim, 256),
@@ -55,10 +56,10 @@ class VisualEncoder(nn.Module):
 
         x = torch.tensor(np.stack(pooled, axis=0))  # (B, input_dim)
 
-        # 自适应特征维度（OpenFace2 可能是 68d）
+        # 自适应特征维度（OpenFace2 可能是 68d, FACET 可能是 35d/42d）
         if x.shape[-1] != self.input_dim:
-            # 即时创建适配层
-            adapter = nn.Linear(x.shape[-1], self.input_dim).to(x.device)
-            x = adapter(x)
+            if self.input_adapter is None:
+                self.input_adapter = nn.Linear(x.shape[-1], self.input_dim).to(x.device)
+            x = self.input_adapter(x)
 
         return self.mlp(x)  # (B, 768)

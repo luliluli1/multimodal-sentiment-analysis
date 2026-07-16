@@ -216,7 +216,6 @@ class Trainer:
             {
                 "epoch": epoch,
                 "model_state_dict": self.model.state_dict(),
-                "optimizer_state_dict": self.optimizer.state_dict(),
                 "metrics": metrics,
             },
             path,
@@ -239,6 +238,7 @@ class Trainer:
     def load_checkpoint(self, path: str):
         ckpt = torch.load(path, map_location=self.device)
         self.model.load_state_dict(ckpt["model_state_dict"])
-        self.optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        if "optimizer_state_dict" in ckpt:
+            self.optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         print(f"Loaded checkpoint: {path} (epoch {ckpt['epoch']})")
         return ckpt.get("metrics", {})

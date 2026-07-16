@@ -3,10 +3,16 @@
 训练入口 — CMU-MOSEI
 
 用法:
-  # 消融实验
+  # 单模态 Baseline
   python scripts/train.py --sdk --epochs 50 --modalities text
+  python scripts/train.py --sdk --epochs 50 --modalities visual
+  python scripts/train.py --sdk --epochs 50 --modalities audio
+
+  # 双模态
   python scripts/train.py --sdk --epochs 50 --modalities text audio
   python scripts/train.py --sdk --epochs 50 --modalities text visual
+
+  # Full
   python scripts/train.py --sdk --epochs 50 --modalities text audio visual
 
   # 继续训练
@@ -38,7 +44,7 @@ def main():
     parser.add_argument("--checkpoint", type=str, default=None)
     parser.add_argument("--modalities", nargs="+", default=["text", "audio", "visual"],
                         choices=["text", "audio", "visual"],
-                        help="e.g. --modalities text | text audio | text visual | text audio visual")
+                        help="text | visual | audio | text visual | text audio | text audio visual")
     parser.add_argument("--tag", type=str, default=None,
                         help="实验标签，用于 checkpoint 和 results.json 命名")
     args = parser.parse_args()
