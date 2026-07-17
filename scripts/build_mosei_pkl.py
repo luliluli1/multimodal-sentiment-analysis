@@ -89,7 +89,7 @@ def main():
     # ----------------------------------------------------------
     print("\n[2/4] 提取文本和标签...")
 
-    words_seq = dataset.computational_sequences["CMU_MOSEI_TimestampedWords"]
+    words_seq = dataset.computational_sequences["words"]
     labels_seq = dataset.computational_sequences["All Labels"]
 
     all_ids = sorted(set(words_seq.data.keys()) & set(labels_seq.data.keys()))

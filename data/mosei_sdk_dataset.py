@@ -72,24 +72,20 @@ class MOSEISDKDataset(Dataset):
     def _load_remote(self) -> list[dict] | None:
         from mmsdk import mmdatasdk
 
-        # 只下载本项目使用的 4 个序列，并统一使用 CSD root name 作为 key。
+        # 只下载本项目使用的 4 个序列，key 与 CSD 内部 root name 一致。
         recipe = {
-            "CMU_MOSEI_TimestampedWords":
-                mmdatasdk.cmu_mosei.raw["words"],
-            "CMU_MOSEI_COVAREP":
-                mmdatasdk.cmu_mosei.highlevel["COVAREP"],
-            "CMU_MOSEI_VisualFacet42":
-                mmdatasdk.cmu_mosei.highlevel["FACET 4.2"],
-            "CMU_MOSEI_Labels":
-                mmdatasdk.cmu_mosei.labels["All Labels"],
+            "words":      mmdatasdk.cmu_mosei.raw["words"],
+            "COVAREP":    mmdatasdk.cmu_mosei.highlevel["COVAREP"],
+            "FACET 4.2":  mmdatasdk.cmu_mosei.highlevel["FACET 4.2"],
+            "All Labels": mmdatasdk.cmu_mosei.labels["All Labels"],
         }
         dataset = mmdatasdk.mmdataset(recipe, self.cache_dir)
-        dataset.align("CMU_MOSEI_Labels")
+        dataset.align("All Labels")
 
-        words_seq = dataset.computational_sequences["CMU_MOSEI_TimestampedWords"]
-        labels_seq = dataset.computational_sequences["CMU_MOSEI_Labels"]
-        facet_seq = dataset.computational_sequences.get("CMU_MOSEI_VisualFacet42")
-        covarep_seq = dataset.computational_sequences.get("CMU_MOSEI_COVAREP")
+        words_seq = dataset.computational_sequences["words"]
+        labels_seq = dataset.computational_sequences["All Labels"]
+        facet_seq = dataset.computational_sequences.get("FACET 4.2")
+        covarep_seq = dataset.computational_sequences.get("COVAREP")
 
         return self._build_samples(words_seq, labels_seq, facet_seq, covarep_seq)
 
@@ -114,12 +110,12 @@ class MOSEISDKDataset(Dataset):
 
         print("  加载并按标签对齐本地 .csd 文件...")
         dataset = mmdatasdk.mmdataset(self.cache_dir)
-        dataset.align("CMU_MOSEI_Labels")
+        dataset.align("All Labels")
 
-        words_seq = dataset.computational_sequences["CMU_MOSEI_TimestampedWords"]
-        labels_seq = dataset.computational_sequences["CMU_MOSEI_Labels"]
-        facet_seq = dataset.computational_sequences["CMU_MOSEI_VisualFacet42"]
-        covarep_seq = dataset.computational_sequences["CMU_MOSEI_COVAREP"]
+        words_seq = dataset.computational_sequences["words"]
+        labels_seq = dataset.computational_sequences["All Labels"]
+        facet_seq = dataset.computational_sequences["FACET 4.2"]
+        covarep_seq = dataset.computational_sequences["COVAREP"]
 
         # align 后再取所有序列中共有的 segment ID。
         common_ids = (

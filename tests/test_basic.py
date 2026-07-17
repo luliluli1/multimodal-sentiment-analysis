@@ -288,16 +288,16 @@ class TestMOSEIDataLoading:
             )
 
         return {
-            "CMU_MOSEI_TimestampedWords": sequence(
+            "words": sequence(
                 np.array([[b"hello"]], dtype=object)
             ),
-            "CMU_MOSEI_Labels": sequence(
+            "All Labels": sequence(
                 np.array([[1.0]], dtype=np.float32)
             ),
-            "CMU_MOSEI_VisualFacet42": sequence(
+            "FACET 4.2": sequence(
                 np.zeros((2, 42), dtype=np.float32)
             ),
-            "CMU_MOSEI_COVAREP": sequence(
+            "COVAREP": sequence(
                 np.zeros((2, 74), dtype=np.float32)
             ),
         }
@@ -337,7 +337,7 @@ class TestMOSEIDataLoading:
         samples = dataset._load_local()
 
         assert calls["path"] == str(tmp_path)
-        assert calls["reference"] == "CMU_MOSEI_Labels"
+        assert calls["reference"] == "All Labels"
         assert samples[0]["text"] == "hello"
         assert samples[0]["visual"].shape == (2, 42)
         assert samples[0]["audio"].shape == (2, 74)
@@ -384,7 +384,7 @@ class TestMOSEIDataLoading:
 
         assert set(calls["recipe"]) == set(self_sequences)
         assert calls["destination"] == "cache"
-        assert calls["reference"] == "CMU_MOSEI_Labels"
+        assert calls["reference"] == "All Labels"
         assert len(samples) == 1
 
 
