@@ -1,164 +1,239 @@
-# 🎭 多模态情感分析 MVP
+# Multimodal Sentiment Analysis
 
-文本 + 图像 + 音频 → 综合情感极性 (positive / neutral / negative)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.x-red.svg)](https://pytorch.org/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-## 项目结构
+**Cross-Attention Fusion of Text, Audio, and Visual Modalities for Sentiment Regression on CMU-MOSEI.**
+
+---
+
+## Overview
+
+Sentiment analysis is inherently a multimodal problem — human emotion is conveyed through **words**, **tone of voice**, and **facial expressions**. This project addresses the task of **multimodal sentiment regression** on the [CMU-MOSEI](http://multicomp.cs.cmu.edu/resources/cmu-mosei-dataset/) dataset, predicting a continuous sentiment score in the range `[-3, +3]` from aligned text, audio, and visual sequences.
+
+The model uses a **BERT** text encoder, a **COVAREP** adapter for acoustic features, and a **FACET** encoder for visual features. These are fused through a **cross-attention mechanism** and passed to a regression head. The project includes a full ablation study to measure the contribution of each modality.
+
+---
+
+## Model Architecture
+
+```
+   Text                      Audio                    Visual
+    │                          │                         │
+    ▼                          ▼                         ▼
+┌─────────┐            ┌───────────────┐        ┌───────────────┐
+│  BERT   │            │CovarepAdapter │        │ VisualEncoder │
+│  base   │            │  (74d → 768d) │        │(FACET 35d/42d │
+│ (768d)  │            │               │        │    → 768d)    │
+└────┬────┘            └───────┬───────┘        └───────┬───────┘
+     │                         │                         │
+     └─────────────────────────┼─────────────────────────┘
+                               │
+                  ┌────────────▼────────────┐
+                  │  Cross-Attention Fusion │
+                  │  (text as query)        │
+                  └────────────┬────────────┘
+                               │
+                  ┌────────────▼────────────┐
+                  │   MLP Regression Head   │
+                  │   (768 → 256 → 1)       │
+                  └────────────┬────────────┘
+                               │
+                               ▼
+                    Sentiment Score [-3, +3]
+```
+
+- **Single modality** (text, visual, or audio alone) bypasses fusion and uses a shared `classifier_head`.
+- **Two modalities** (text+visual or text+audio) use cross-attention with the text tensor as query.
+- **Three modalities** (full) use cross-attention over all three modalities.
+
+---
+
+## Dataset
+
+**CMU-MOSEI** (Multimodal Opinion Sentiment and Emotion Intensity) is the largest publicly available multimodal sentiment analysis dataset:
+
+| Statistic | Value |
+|-----------|-------|
+| Videos | 3,228 |
+| Segments | 23,248 |
+| Modalities | Text, Audio (COVAREP), Visual (FACET) |
+| Labels | Sentiment `[-3, +3]` (regression) |
+| Split | Official standard_folds (train: 16,322 / val: 1,871 / test: 4,659) |
+
+The dataset is loaded via the [CMU Multimodal SDK](https://github.com/A2Zadeh/CMU-MultimodalSDK) from local `.csd` files placed in `data/mosei_raw/`.
+
+---
+
+## Features
+
+- **BERT-base** text encoder with configurable fine-tuning strategy (`all` / `top2` / `none`)
+- **COVAREP features** (74-dimensional acoustic descriptors) with finite-value masked pooling to handle missing/infinite values present in the raw data
+- **FACET features** (facial action units) with adaptive dimension projection
+- **Cross-Attention Fusion** with text as the query modality
+- **Unified modality routing** — automatically detects available modalities per batch and routes through the correct path (single → classifier, multi → fusion)
+- **Full ablation study** — text-only, visual-only, audio-only, text+visual, text+audio, and full model
+- **Early stopping**, learning rate warmup, gradient clipping
+- **Auto device detection** (CUDA / MPS / CPU)
+- **Deterministic training** with fixed random seed (`SEED = 42`) for reproducibility
+
+---
+
+## Experiments
+
+Six configurations were trained under identical hyperparameters:
+
+| Model | Modalities | Description |
+|-------|-----------|-------------|
+| Full | text + audio + visual | All three modalities |
+| Text Only | text | BERT only, no fusion |
+| Visual Only | visual | FACET features only |
+| Audio Only | audio | COVAREP features only |
+| Text + Audio | text + audio | Dual-modal fusion |
+| Text + Visual | text + visual | Dual-modal fusion |
+
+The first four (required for the ablation comparison) were trained on GPU, while visual-only and audio-only baselines can be trained with the same script.
+
+---
+
+## Results
+
+Final test-set metrics (four primary ablation configurations):
+
+| Model | MAE ↓ | Corr ↑ | Acc-7 ↑ | Acc-2 ↑ | F1 ↑ |
+|-------|------:|------:|------:|------:|------:|
+| Text Only | 0.5474 | 0.7436 | 0.5256 | 0.8465 | 0.8459 |
+| Text + Audio | 0.5607 | 0.7321 | 0.5188 | 0.8401 | 0.8368 |
+| Text + Visual | 0.5507 | 0.7397 | 0.5319 | 0.8431 | 0.8425 |
+| **Text + Audio + Visual** | **0.5476** | **0.7437** | **0.5327** | **0.8423** | **0.8387** |
+
+### Metrics
+
+| Metric | Description | Range |
+|--------|-------------|-------|
+| **MAE** | Mean Absolute Error between predicted and ground-truth scores | `[0, 6]` (lower is better) |
+| **Corr** | Pearson correlation coefficient | `[-1, 1]` (higher is better) |
+| **Acc-7** | 7-class accuracy (rounded to nearest integer in `[-3, +3]`) | `[0, 1]` |
+| **Acc-2** | Binary accuracy (positive vs. negative, excluding neutral) | `[0, 1]` |
+| **F1** | Weighted F1 score for binary classification | `[0, 1]` |
+
+Full results including validation metrics, training curves, and early stopping details are in `final_results/`. Generate the summary table with:
+
+```bash
+python scripts/collect_results.py
+```
+
+---
+
+## Project Structure
 
 ```
 multimodal-sentiment-analysis/
-├── config.py                 # 全局配置 (模型名、设备、权重)
-├── main.py                   # CLI 命令行入口
-├── api.py                    # FastAPI HTTP 接口
-├── app.py                    # Streamlit 可视化 Demo
-├── requirements.txt          # 依赖
-│
-├── models/                   # 模型模块
-│   ├── text_model.py         # 文本情感 (RoBERTa)
-│   ├── image_model.py        # 图像情感 (ViT)
-│   ├── audio_model.py        # 语音情感 (Wav2Vec2)
-│   └── fusion.py             # 多模态加权融合
-│
-├── utils/                    # 工具模块
-│   ├── preprocessing.py      # 数据预处理
-│   └── postprocessing.py     # 结果格式化
-│
-├── tests/                    # 测试
-│   └── test_basic.py
-│
-└── examples/                 # 示例文件 (可自行放入)
+├── models/
+│   ├── multimodal_model.py    # Top-level model & modality routing
+│   ├── text_encoder.py        # BERT-base encoder
+│   ├── visual_encoder.py      # FACET feature encoder
+│   ├── audio_encoder.py       # Wav2Vec2 encoder (for raw audio)
+│   ├── covarep_adapter.py     # COVAREP 74d → 768d adapter
+│   ├── image_encoder.py       # ViT encoder (for image files)
+│   └── fusion.py              # Cross-modal attention + MLP fusion
+├── data/
+│   └── mosei_sdk_dataset.py   # CMU-MOSEI SDK data loader
+├── trainers/
+│   ├── trainer.py             # Training loop, early stopping, checkpointing
+│   └── metrics.py             # MAE, Corr, Acc-7, Acc-2, F1
+├── scripts/
+│   ├── train.py               # Training entry point
+│   ├── collect_results.py     # Ablation results → CSV summary
+│   ├── plot_history.py        # Training curve visualisation
+│   └── run_ablations.sh       # Batch ablation experiment runner
+├── final_results/              # Final experiment results (paper-ready)
+│   ├── full.json
+│   ├── text_only.json
+│   ├── text_audio.json
+│   ├── text_visual.json
+│   ├── ablation_results.csv
+│   └── README.md
+├── inference.py               # Predictor class & CLI
+├── app.py                     # Streamlit demo
+├── api.py                     # FastAPI server
+├── config.py                  # Global configuration & hyperparameters
+└── requirements.txt
 ```
 
-## 数据流
+---
 
-```
-输入                          单模态推理                    融合                      输出
-──────                      ────────────                ──────                    ──────
-text  ───→ preprocess ───→ TextSentimentModel ───┐
-                                                   │
-image ───→ preprocess ───→ ImageEmotionModel  ────┼──→ MultimodalFusion ──→ format_result
-                                                   │     (加权求和)
-audio ───→ preprocess ───→ AudioEmotionModel ────┘
-```
-
-1. **预处理**: 文本清洗/图像转RGB/音频重采样 16kHz mono
-2. **单模态推理**: 各自预训练模型输出 scores
-3. **融合**: 按配置权重 `{text:0.5, image:0.3, audio:0.2}` 加权求和
-4. **后处理**: 格式化为统一 JSON + 终端/Web 展示
-
-## 预训练模型
-
-| 模态 | 模型 | 输出 |
-|------|------|------|
-| 文本 | `cardiffnlp/twitter-roberta-base-sentiment-latest` | neg / neu / pos |
-| 图像 | `trpakov/vit-face-expression` | 7种表情 → 映射到极性 |
-| 音频 | `ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition` | 6种情绪 → 映射到极性 |
-
-首次运行会自动从 HuggingFace Hub 下载模型（约 1.5GB），后续使用缓存。
-
-## 安装 & 运行
-
-### 1. 创建虚拟环境
+## Installation
 
 ```bash
+git clone https://github.com/your-username/multimodal-sentiment-analysis.git
 cd multimodal-sentiment-analysis
+
 python -m venv venv
-source venv/bin/activate    # macOS/Linux
-```
+source venv/bin/activate    # macOS / Linux
+# venv\Scripts\activate     # Windows
 
-### 2. 安装依赖
-
-```bash
 pip install -r requirements.txt
-# 注意: PyTorch 建议按官方指南安装对应平台版本
-# https://pytorch.org/get-started/locally/
 ```
 
-### 3. 运行方式
+**CMU-MOSEI data:** download the four `.csd` files from the [official source](https://github.com/A2Zadeh/CMU-MultimodalSDK) and place them in `data/mosei_raw/`:
 
-**命令行 (CLI)**:
-```bash
-# 纯文本
-python main.py --text "I love this movie!"
+- `CMU_MOSEI_TimestampedWords.csd`
+- `CMU_MOSEI_COVAREP.csd`
+- `CMU_MOSEI_VisualFacet42.csd`
+- `CMU_MOSEI_Labels.csd`
 
-# 文本 + 图像
-python main.py --text "This is amazing" --image examples/sample_image.jpg
+The dataset will be loaded automatically via the CMU Multimodal SDK.
 
-# 全部三个模态
-python main.py --text "What a great day" --image examples/sample_image.jpg --audio examples/sample_audio.wav
-```
+---
 
-**Web UI (Streamlit)**:
-```bash
-streamlit run app.py
-# 浏览器打开 http://localhost:8501
-```
+## Training
 
-**API 服务 (FastAPI)**:
-```bash
-python api.py
-# 浏览器打开 http://localhost:8000/docs 查看 Swagger 文档
-```
+### Full model (text + audio + visual)
 
 ```bash
-# 调用示例
-curl -X POST http://localhost:8000/analyze \
-  -F "text=I'm feeling great today!" \
-  -F "image=@examples/sample_image.jpg"
+python scripts/train.py --sdk --epochs 50 --modalities text audio visual --tag full
 ```
 
-### 4. 运行测试
+### Ablation experiments
 
 ```bash
-python -m pytest tests/ -v
+# Text only
+python scripts/train.py --sdk --epochs 50 --modalities text          --tag text_only
+
+# Text + Audio
+python scripts/train.py --sdk --epochs 50 --modalities text audio    --tag text_audio
+
+# Text + Visual
+python scripts/train.py --sdk --epochs 50 --modalities text visual   --tag text_visual
 ```
 
-## 配置说明
+### Run all ablations sequentially
 
-编辑 `config.py` 可调整:
-
-- `DEVICE`: 推理设备 (`"cpu"` / `"cuda"` / `"mps"`)
-- `FUSION_WEIGHTS`: 各模态融合权重
-- `AUDIO_SAMPLE_RATE` / `AUDIO_MAX_DURATION`: 音频参数
-- `TEXT_MAX_LENGTH`: 文本截断长度
-
-## 输出示例
-
-```json
-{
-  "overall": {
-    "sentiment": "positive",
-    "confidence": 0.8234
-  },
-  "scores": {
-    "negative": 0.0521,
-    "neutral": 0.1245,
-    "positive": 0.8234
-  },
-  "modalities": {
-    "text": {
-      "label": "positive",
-      "sentiment": "positive",
-      "confidence": 0.91
-    },
-    "image": {
-      "label": "happy",
-      "sentiment": "positive",
-      "confidence": 0.78
-    },
-    "audio": {
-      "label": "happy",
-      "sentiment": "positive",
-      "confidence": 0.72
-    }
-  }
-}
+```bash
+bash scripts/run_ablations.sh 50 cuda
 ```
 
-## 后续扩展方向
+Training saves checkpoints to `checkpoints/`, results to `results_{tag}.json`, per-epoch metrics to `history_{tag}.json`, and archives everything to `experiments/autodl/{tag}/`.
 
-- [ ] 视频模态 (逐帧分析 + 时序聚合)
-- [ ] 更复杂的融合策略 (Attention-based / Gated Fusion)
-- [ ] 中文支持 (替换中文预训练模型)
-- [ ] GPU 推理加速
-- [ ] Docker 部署
-- [ ] 实时摄像头 + 麦克风输入
+---
+
+## Reproducibility
+
+- **Random seed** is fixed at `SEED = 42` (see `config.py`) covering `random`, `numpy`, `torch`, and CUDA backends
+- **Official CMU-MOSEI standard_folds** are used for train/val/test splits
+- **All experiment results** are saved in `final_results/` with full metrics
+- Training uses **early stopping** with patience = 5 based on validation MAE
+
+To reproduce the exact results, use the same training commands under the same hyperparameters (`config.py`) and hardware (NVIDIA RTX 3090 / 4090).
+
+---
+
+## Future Work
+
+- Integrate pre-trained audio encoders (e.g., Wav2Vec2, HuBERT) as an alternative to COVAREP features
+- Explore stronger fusion mechanisms (e.g., gated fusion, transformer-based fusion)
+- Support additional datasets (CMU-MOSI, IEMOCAP, MELD)
+- Add visual-only and audio-only single-modality baselines to the primary ablation table
+- Publish trained model weights on Hugging Face Hub
