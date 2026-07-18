@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import (
     NUM_EPOCHS, LEARNING_RATE, BATCH_SIZE, DEVICE,
     MOSEI_PKL_PATH, MOSEI_SPLIT_TRAIN, MOSEI_SPLIT_VAL, CHECKPOINT_DIR,
+    SEED, set_seed,
 )
 from data.dataset import CMUMOSEIDataset
 from data.mosei_sdk_dataset import MOSEISDKDataset
@@ -34,6 +35,8 @@ from trainers.trainer import Trainer
 
 
 def main():
+    set_seed(SEED)
+
     parser = argparse.ArgumentParser(description="CMU-MOSEI 多模态情感分析 — 训练")
     parser.add_argument("--sdk", action="store_true")
     parser.add_argument("--data", type=str, default=MOSEI_PKL_PATH)

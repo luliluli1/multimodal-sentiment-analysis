@@ -34,3 +34,6 @@ build/
 # IDE
 .vscode/
 .idea/
+
+# Experiment archives (local only)
+experiments/

@@ -144,3 +144,9 @@ done
 echo ""
 echo "  📊 comparison.csv  — 论文表格 (可直接导入 Excel/Google Sheets)"
 echo "  📝 comparison.md   — 论文/PPT Markdown 表格"
+
+	# Archive to experiments
+	mkdir -p experiments/autodl
+	cp comparison.csv comparison.md experiments/autodl/ 2>/dev/null || true
+	echo "  📁 experiments/autodl/comparison.csv"
+	echo "  📁 experiments/autodl/comparison.md"

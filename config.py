@@ -3,6 +3,26 @@
 """
 
 import os
+import random
+import numpy as np
+import torch
+
+# ============================================================
+# 随机种子（论文实验可复现性）
+# ============================================================
+SEED = 42
+
+
+def set_seed(seed: int = SEED):
+    """固定所有随机种子，确保实验可复现。"""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 # ============================================================
 # 设备
@@ -40,6 +60,12 @@ WEIGHT_DECAY = 1e-4
 NUM_EPOCHS = 50
 WARMUP_STEPS = 500
 GRADIENT_CLIP = 1.0
+
+# ============================================================
+# Early Stopping
+# ============================================================
+EARLY_STOPPING_PATIENCE = 5     # 连续无改善 epoch 数后停止；设为 0 关闭
+EARLY_STOPPING_MIN_DELTA = 1e-4 # MAE 改善阈值
 
 # ============================================================
 # Fine-tuning 策略

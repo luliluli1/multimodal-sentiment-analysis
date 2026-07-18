@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import time
 import torch
 import torch.nn as nn
@@ -26,6 +27,8 @@ from config import (
     CHECKPOINT_DIR,
     WARMUP_STEPS,
     DEVICE,
+    EARLY_STOPPING_PATIENCE,
+    EARLY_STOPPING_MIN_DELTA,
 )
 from trainers.metrics import compute_metrics, format_metrics
 
@@ -80,8 +83,17 @@ class Trainer:
 
         self.tag = tag
         self.best_mae = float("inf")
+        self.best_epoch = 0
         self.best_metrics = None
         self.best_checkpoint_path = None
+        self.history: list[dict] = []  # 每 epoch 指标
+
+        # Early Stopping
+        self.patience = EARLY_STOPPING_PATIENCE
+        self.min_delta = EARLY_STOPPING_MIN_DELTA
+        self.patience_counter = 0
+        self.stopped_early = False
+
         os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
     # ----------------------------------------------------------
@@ -123,15 +135,41 @@ class Trainer:
             log += f" | {elapsed:.1f}s"
             print(log)
 
-            # 保存最佳
-            if val_metrics and val_metrics["mae"] < self.best_mae:
-                self.best_mae = val_metrics["mae"]
-                self.best_metrics = val_metrics
-                self._save_checkpoint(epoch, val_metrics)
+            # 记录 epoch 历史（训练中断时已保存的 epoch 不丢失）
+            self._record_history(epoch, train_loss, val_loss, val_metrics)
+            self._save_history()
+
+            # Early Stopping & Checkpoint（统一使用 validation MAE）
+            if val_metrics:
+                current_mae = val_metrics["mae"]
+                if current_mae < self.best_mae - self.min_delta:
+                    self.best_mae = current_mae
+                    self.best_epoch = epoch
+                    self.best_metrics = val_metrics
+                    self.patience_counter = 0
+                    self._save_checkpoint(epoch, val_metrics)
+                    print(f"  ✓ MAE improved → patience reset")
+                else:
+                    self.patience_counter += 1
+
+                patience_msg = f"  Patience: {self.patience_counter}/{self.patience}"
+                if self.patience > 0:
+                    print(patience_msg)
+
+                if self.patience > 0 and self.patience_counter >= self.patience:
+                    self.stopped_early = True
+                    print(f"\n{'='*55}")
+                    print(f"  Early Stopping Triggered")
+                    print(f"  Best Epoch : {self.best_epoch}")
+                    print(f"  Best MAE   : {self.best_mae:.4f}")
+                    print(f"  Stopped At : {epoch}")
+                    print(f"{'='*55}")
+                    break
 
         if self.best_checkpoint_path is not None:
             self._restore_best_model()
-        print(f"\n训练完成 — best MAE={self.best_mae:.4f}")
+        status = "early stop" if self.stopped_early else "complete"
+        print(f"\n训练{status} — best MAE={self.best_mae:.4f} (epoch {self.best_epoch})")
 
     # ----------------------------------------------------------
     # One epoch
@@ -250,6 +288,7 @@ class Trainer:
             path,
         )
         self.best_checkpoint_path = path
+        self._archive_checkpoint(path)
         print(f"  → checkpoint saved: {os.path.basename(path)}")
 
     def _restore_best_model(self):
@@ -261,19 +300,92 @@ class Trainer:
             f"{os.path.basename(self.best_checkpoint_path)}"
         )
 
+    # ----------------------------------------------------------
+    # Training History（每个 epoch 后实时保存）
+    # ----------------------------------------------------------
+    def _get_current_lr(self) -> float:
+        """返回当前第一个 param_group 的学习率。"""
+        return self.optimizer.param_groups[0]["lr"]
+
+    def _record_history(
+        self,
+        epoch: int,
+        train_loss: float,
+        val_loss: float | None,
+        val_metrics: dict | None,
+    ):
+        lr = self._get_current_lr()
+        entry = {
+            "epoch": epoch,
+            "train_loss": round(train_loss, 4),
+            "val_loss": round(val_loss, 4) if val_loss is not None else None,
+            "mae": val_metrics["mae"] if val_metrics else None,
+            "corr": val_metrics["corr"] if val_metrics else None,
+            "acc7": val_metrics["acc7"] if val_metrics else None,
+            "acc2": val_metrics["acc2"] if val_metrics else None,
+            "f1": val_metrics["f1"] if val_metrics else None,
+            "lr": round(lr, 8),
+        }
+        self.history.append(entry)
+
+    def _save_history(self):
+        """每个 epoch 后实时写入 history JSON，防止训练中断丢失。"""
+        import json
+        safe_tag = "".join(
+            c if c.isalnum() or c in "-_" else "_" for c in self.tag
+        )
+        path = f"history_{safe_tag}.json"
+        with open(path, "w") as f:
+            json.dump(self.history, f, indent=2)
+        # 同时归档到 experiments
+        archive_dir = self._archive_dir()
+        arc_path = os.path.join(archive_dir, os.path.basename(path))
+        with open(arc_path, "w") as f:
+            json.dump(self.history, f, indent=2)
+
+    # ----------------------------------------------------------
+    # Experiments 归档
+    # ----------------------------------------------------------
+    def _archive_dir(self) -> str:
+        """返回 experiments/autodl/{tag}/ 目录，按需创建。"""
+        safe_tag = "".join(
+            c if c.isalnum() or c in "-_" else "_" for c in self.tag
+        )
+        d = os.path.join("experiments", "autodl", safe_tag)
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    def _archive_checkpoint(self, src_path: str):
+        """将 checkpoint 复制到 experiments 目录。"""
+        dst = os.path.join(self._archive_dir(), os.path.basename(src_path))
+        if os.path.abspath(src_path) != os.path.abspath(dst):
+            shutil.copy2(src_path, dst)
+
     def save_results(self, test_metrics: dict | None = None):
-        """保存实验结果到 results_{tag}.json"""
+        """保存实验结果到 results_{tag}.json，同时归档到 experiments 目录。"""
         import json
         result = {
             "tag": self.tag,
             "best_val_metrics": self.best_metrics,
             "test_metrics": test_metrics,
             "best_checkpoint": self.best_checkpoint_path,
+            "best_epoch": self.best_epoch,
+            "stop_epoch": len(self.history),
+            "stopped_early": self.stopped_early,
+            "patience": self.patience,
+            "min_delta": self.min_delta,
         }
+        # 项目根目录（保持向后兼容）
         path = f"results_{self.tag}.json"
         with open(path, "w") as f:
             json.dump(result, f, indent=2)
         print(f"Results saved to {path}")
+        # 同时归档到 experiments 目录
+        archive_dir = self._archive_dir()
+        arc_path = os.path.join(archive_dir, os.path.basename(path))
+        with open(arc_path, "w") as f:
+            json.dump(result, f, indent=2)
+        print(f"  → archived: {arc_path}")
 
     def load_checkpoint(self, path: str):
         ckpt = torch.load(path, map_location=self.device)
