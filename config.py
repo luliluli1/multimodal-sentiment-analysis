@@ -27,7 +27,16 @@ def set_seed(seed: int = SEED):
 # ============================================================
 # 设备
 # ============================================================
-DEVICE = "cpu"  # "cpu" | "cuda" | "mps"
+def _detect_device() -> str:
+    """自动检测可用设备: cuda > mps > cpu。"""
+    if torch.cuda.is_available():
+        return "cuda"
+    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+DEVICE = _detect_device()
 
 # ============================================================
 # 预训练模型 (encoder)
