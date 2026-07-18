@@ -1,0 +1,23 @@
+{
+  "tag": "text_visual",
+  "best_val_metrics": {
+    "mae": 0.5229,
+    "corr": 0.7309,
+    "acc7": 0.5478,
+    "acc2": 0.8526,
+    "f1": 0.8519
+  },
+  "test_metrics": {
+    "mae": 0.5507,
+    "corr": 0.7397,
+    "acc7": 0.5319,
+    "acc2": 0.8431,
+    "f1": 0.8425
+  },
+  "best_checkpoint": "/root/autodl-tmp/checkpoints/best_text_visual_epoch002_mae0.5229.pt",
+  "best_epoch": 2,
+  "stop_epoch": 7,
+  "stopped_early": true,
+  "patience": 5,
+  "min_delta": 0.0001
+}

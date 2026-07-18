@@ -36,5 +36,8 @@ build/
 .vscode/
 .idea/
 
-# Experiment archives (local only)
+# 实验归档
+archive/
+backup_check/
+checkpoints_final/
 experiments/

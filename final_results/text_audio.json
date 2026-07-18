@@ -1,0 +1,23 @@
+{
+  "tag": "text_audio",
+  "best_val_metrics": {
+    "mae": 0.5359,
+    "corr": 0.7143,
+    "acc7": 0.5329,
+    "acc2": 0.8519,
+    "f1": 0.8488
+  },
+  "test_metrics": {
+    "mae": 0.5607,
+    "corr": 0.7321,
+    "acc7": 0.5188,
+    "acc2": 0.8401,
+    "f1": 0.8368
+  },
+  "best_checkpoint": "/root/autodl-tmp/checkpoints/best_text_audio_epoch002_mae0.5359.pt",
+  "best_epoch": 2,
+  "stop_epoch": 7,
+  "stopped_early": true,
+  "patience": 5,
+  "min_delta": 0.0001
+}
