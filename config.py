@@ -104,10 +104,18 @@ AUDIO_MAX_DURATION = 6  # 秒
 AUDIO_MAX_LENGTH = AUDIO_SAMPLE_RATE * AUDIO_MAX_DURATION  # 96000 samples
 
 # ============================================================
-# 路径
+# 路径（AutoDL 数据盘自动检测）
 # ============================================================
-CHECKPOINT_DIR = "./checkpoints"
-LOG_DIR = "./logs"
+_AUTODL_TMP = "/root/autodl-tmp"
+if os.path.isdir(_AUTODL_TMP):
+    _ROOT = _AUTODL_TMP
+else:
+    _ROOT = "."
+
+CHECKPOINT_DIR = os.path.join(_ROOT, "checkpoints")
+EXPERIMENTS_DIR = os.path.join(_ROOT, "experiments")
+LOG_DIR = os.path.join(_ROOT, "logs")
+RESULTS_DIR = _ROOT  # results_xxx.json / history_xxx.json 保存位置
 
 # ============================================================
 # 标签

@@ -25,6 +25,8 @@ from config import (
     NUM_EPOCHS,
     GRADIENT_CLIP,
     CHECKPOINT_DIR,
+    EXPERIMENTS_DIR,
+    RESULTS_DIR,
     WARMUP_STEPS,
     DEVICE,
     EARLY_STOPPING_PATIENCE,
@@ -334,7 +336,7 @@ class Trainer:
         safe_tag = "".join(
             c if c.isalnum() or c in "-_" else "_" for c in self.tag
         )
-        path = f"history_{safe_tag}.json"
+        path = os.path.join(RESULTS_DIR, f"history_{safe_tag}.json")
         with open(path, "w") as f:
             json.dump(self.history, f, indent=2)
         # 同时归档到 experiments
@@ -351,7 +353,7 @@ class Trainer:
         safe_tag = "".join(
             c if c.isalnum() or c in "-_" else "_" for c in self.tag
         )
-        d = os.path.join("experiments", "autodl", safe_tag)
+        d = os.path.join(EXPERIMENTS_DIR, "autodl", safe_tag)
         os.makedirs(d, exist_ok=True)
         return d
 
@@ -376,7 +378,7 @@ class Trainer:
             "min_delta": self.min_delta,
         }
         # 项目根目录（保持向后兼容）
-        path = f"results_{self.tag}.json"
+        path = os.path.join(RESULTS_DIR, f"results_{self.tag}.json")
         with open(path, "w") as f:
             json.dump(result, f, indent=2)
         print(f"Results saved to {path}")

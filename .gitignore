@@ -11,6 +11,7 @@ data/*.zip
 checkpoints/
 logs/
 results_*.json
+history_*.json
 
 # 模型权重
 *.pt
